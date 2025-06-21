@@ -1,0 +1,310 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <dirent.h>
+#include <string.h>
+#include <ctype.h>
+#include <unistd.h>
+#include <time.h>
+#include <math.h>
+
+#define CONFIG_PATH "/etc/matcomguard.conf"
+#define DEFAULT_CPU_THRESHOLD 40
+#define DEFAULT_RAM_THRESHOLD 50
+#define DEFAULT_DURATION 10
+
+typedef struct {
+    pid_t pid;
+    char name[256];
+    unsigned long cpu_usage;  
+    unsigned long ram_usage;  
+    time_t start_time;
+    time_t last_alert;
+    double cpu_percent; 
+    double ram_percent; 
+} Proceso;
+
+typedef struct {
+    int cpu_threshold;
+    int ram_threshold;
+    int alert_duration;
+    char whitelist[10][256];
+    int whitelist_count;
+} Configuracion;
+
+void leer_configuracion(Configuracion *config) {
+    config->cpu_threshold = DEFAULT_CPU_THRESHOLD;
+    config->ram_threshold = DEFAULT_RAM_THRESHOLD;
+    config->alert_duration = DEFAULT_DURATION;
+    config->whitelist_count = 0;
+
+    FILE *archivo = fopen(CONFIG_PATH, "r");
+    if (!archivo) return;
+
+    char linea[256];
+    while (fgets(linea, sizeof(linea), archivo)) {
+        if (strstr(linea, "UMBRAL_CPU")) 
+            sscanf(linea, "UMBRAL_CPU=%d", &config->cpu_threshold);
+        else if (strstr(linea, "UMBRAL_RAM"))
+            sscanf(linea, "UMBRAL_RAM=%d", &config->ram_threshold);
+        else if (strstr(linea, "WHITELIST"))
+            sscanf(linea, "WHITELIST=%255s", config->whitelist[config->whitelist_count++]);
+    }
+    fclose(archivo);
+}
+
+void obtener_tiempos_cpu(pid_t pid, unsigned long *utime, unsigned long *stime) {
+    char path[256], buffer[1024];
+    snprintf(path, sizeof(path), "/proc/%d/stat", pid);
+    FILE *f = fopen(path, "r");
+    
+    if (f && fgets(buffer, sizeof(buffer), f)) {
+        char *token = strtok(buffer, " ");
+        for (int i = 1; i <= 13; i++) token = strtok(NULL, " "); 
+        
+        *utime = strtoul(token, NULL, 10);        
+        token = strtok(NULL, " ");
+        *stime = strtoul(token, NULL, 10);        
+    }
+    fclose(f);
+}
+
+double calcular_porcentaje_cpu(Proceso *actual, Proceso *anterior, double intervalo) {
+    unsigned long delta_total = (actual->cpu_usage - anterior->cpu_usage);
+    return (delta_total * 100.0) / (sysconf(_SC_CLK_TCK) * intervalo);
+}
+
+double calcular_porcentaje_ram(unsigned long vm_rss) {
+    static unsigned long ram_total = 0;
+    if (ram_total == 0) { 
+        FILE *f = fopen("/proc/meminfo", "r");
+        if (f) {
+            fscanf(f, "MemTotal: %lu kB", &ram_total);
+            fclose(f);
+        }
+    }
+    return (ram_total > 0) ? (vm_rss * 100.0) / ram_total : 0;
+}
+
+void calcular_uso_recursos(Proceso *p) {
+    unsigned long utime, stime;
+    obtener_tiempos_cpu(p->pid, &utime, &stime);
+    p->cpu_usage = utime + stime;
+    
+    char path[256], buffer[256];
+    snprintf(path, sizeof(path), "/proc/%d/status", p->pid);
+    FILE *f = fopen(path, "r");
+    if (f) {
+        while (fgets(buffer, sizeof(buffer), f)) {
+            if (strncmp(buffer, "VmRSS:", 6) == 0) {
+                sscanf(buffer + 6, "%lu kB", &p->ram_usage);
+                break;
+            }
+        }
+        fclose(f);
+    }
+    
+    p->ram_percent = calcular_porcentaje_ram(p->ram_usage);
+}
+
+int es_proceso_traidor(Proceso *p, Configuracion *config) {
+    for(int i = 0; i < config->whitelist_count; i++) {
+        if(strcmp(p->name, config->whitelist[i]) == 0) return 0;
+    }
+    
+    if((p->cpu_percent > config->cpu_threshold) || 
+       (p->ram_percent > config->ram_threshold)) {
+        time_t ahora = time(NULL);
+        if(p->start_time == 0) {
+            p->start_time = ahora;
+            return 0;
+        }
+        return  (difftime(ahora, p->start_time) >= config->alert_duration);
+    }
+    p->start_time = 0;
+    return 0;
+}
+
+int es_pid_valido(const char *nombre) {
+    for (int i = 0; nombre[i] != '\0'; i++) {
+        if (!isdigit(nombre[i])) {
+            return 0;
+        }
+    }
+
+    char path[256];
+    snprintf(path, sizeof(path), "/proc/%s/stat", nombre);
+    
+    return (access(path, F_OK) == 0);
+}
+
+void obtener_nombre_proceso(char *nombre, pid_t pid) {
+    char path[256];
+    FILE *fp;
+    char buffer[256];
+    
+    snprintf(path, sizeof(path), "/proc/%d/status", pid);
+    
+    fp = fopen(path, "r");
+    if (fp) {
+        while (fgets(buffer, sizeof(buffer), fp)) {
+            if (strncmp(buffer, "Name:", 5) == 0) {
+                char *start = buffer + 6; 
+                while (*start == ' ' || *start == '\t') start++;
+                char *end = strchr(start, '\n');
+                if (end) *end = '\0';
+                strncpy(nombre, start, 255);
+                break;
+            }
+        }
+        fclose(fp);
+    } else {
+        strcpy(nombre, "desconocido");
+    }
+}
+
+int obtener_procesos_actuales(Proceso *procesos, Configuracion *config) {
+    DIR *dir = opendir("/proc");
+    struct dirent *entrada;
+    int count = 0;
+    
+    while((entrada = readdir(dir)) && count < 500) {
+        if(es_pid_valido(entrada->d_name)) {
+            procesos[count].pid = atoi(entrada->d_name);
+            obtener_nombre_proceso(procesos[count].name, procesos[count].pid);
+            
+        if(strstr(procesos[count].name, "stress-ng") != NULL) {
+        	printf("[DEBUG} Proceso detectado: %s (PID: %d)\n", procesos[count].name, procesos[count].pid);
+        }
+            count++;
+        }
+    }
+    closedir(dir);
+    return count;
+}
+
+void registrar_alerta(Proceso *p, Configuracion *config) {
+    time_t ahora = time(NULL);
+    struct tm *tiempo = localtime(&ahora);
+    char timestamp[20];
+    char log_entry[512];
+    
+    strftime(timestamp, 20, "%Y-%m-%d %H:%M:%S", tiempo);
+    
+    snprintf(log_entry, sizeof(log_entry),
+        "[%s] ALERTA: %s (PID: %d)\n"
+        "-> CPU: %.2f%% (Umbral: %d%%)\n"
+        "-> RAM: %.2f%% (Umbral: %d%%)\n"
+        "-> Duración: %ld segundos\n\n",
+        timestamp,
+        p->name,
+        p->pid,
+        p->cpu_percent,
+        config->cpu_threshold,
+        p->ram_percent,
+        config->ram_threshold,
+        time(NULL) - p->start_time
+    );
+    
+    printf("\033[1;31m"); 
+    printf("%s", log_entry);
+    printf("\033[0m"); 
+    
+    FILE *log = fopen("/var/log/guardian_procesos.log", "a");
+    if (log) {
+        fprintf(log, "%s", log_entry);
+        fclose(log);
+    }
+}
+
+void verificar_umbrales(Proceso *actual, Proceso *previos, int num_previos, 
+                       Configuracion *config, double intervalo) {
+    for(int i = 0; i < num_previos; i++) {
+        if(previos[i].pid == actual->pid) {
+            actual->cpu_percent = calcular_porcentaje_cpu(actual, &previos[i], intervalo);
+        
+            if(actual->cpu_percent > config->cpu_threshold || 
+               actual->ram_percent > config->ram_threshold) {
+                if(actual->start_time == 0) actual->start_time = time(NULL);
+            } else {
+                actual->start_time = 0;
+            }
+            
+            if(es_proceso_traidor(actual, config)) {
+                registrar_alerta(actual, config);
+            }
+            break;
+        }
+    }
+}
+
+void vigilancia_real(time_t intervalo, Configuracion *config) {
+    Proceso *procesos_previos = calloc(500, sizeof(Proceso));
+    Proceso *procesos_actuales = calloc(500, sizeof(Proceso));
+    int num_procesos = 0;
+    time_t tiempo_previo = time(NULL);
+    
+    if(!procesos_previos || !procesos_actuales) {
+    	perror("Error asignando memoria");
+    	exit(EXIT_FAILURE);
+    }
+    
+    num_procesos = obtener_procesos_actuales(procesos_previos, config);
+    for(int i = 0; i < num_procesos; i++){
+    	calcular_uso_recursos(&procesos_previos[i]);
+    }
+    while(1) {
+        time_t tiempo_actual = time(NULL);
+        double delta_tiempo = difftime(tiempo_actual, tiempo_previo);
+        
+        int num_actual = obtener_procesos_actuales(procesos_actuales, config);
+        
+        for(int i = 0; i < num_actual; i++) {
+            calcular_uso_recursos(&procesos_actuales[i]);
+            
+            for(int j =0; j < num_procesos; j++){
+            	if(procesos_actuales[i].pid == procesos_previos[j].pid){
+            		double intervalo_real = difftime(tiempo_actual, tiempo_previo);
+            		procesos_actuales[i].cpu_percent = calcular_porcentaje_cpu(&procesos_actuales[i], &procesos_previos[j], intervalo_real);
+            		break;
+            	}
+            }
+            verificar_umbrales(&procesos_actuales[i], procesos_previos, 
+                              num_procesos, config, delta_tiempo);
+        }
+        
+        memcpy(procesos_previos, procesos_actuales, sizeof(Proceso) * num_actual);
+        num_procesos = num_actual;
+        tiempo_previo = tiempo_actual;
+        
+        printf("---Ciclo completado ---\n");
+        //for(int i =0; i< num_actual; i++){
+        //	printf("PID: %d, Nombre: %s, CPU: %.2f%%, RAM: %.2f%%\n", procesos_actuales[i].pid, procesos_actuales[i].name, procesos_actuales[i].cpu_percent, procesos_actuales[i].ram_percent);
+        //}
+        
+        sleep(intervalo);
+    }
+    free(procesos_previos);
+    free(procesos_actuales);
+}
+
+
+
+int main(int argc, char *argv[]) {
+    FILE *log_procesos = fopen("/var/log/guardian_procesos.log", "a");
+    if (log_procesos) fclose(log_procesos);
+    else perror("No se pudo crear /var/log/guardian_procesos.log");
+    Configuracion config;
+    leer_configuracion(&config);
+    
+    time_t intervalo = 1; 
+    
+    if(argc > 1) {
+        for(int i = 1; i < argc; i++) {
+            if(strcmp(argv[i], "-i") == 0 && i+1 < argc) intervalo = atoi(argv[++i]);
+        }
+    }
+    
+    vigilancia_real(intervalo, &config);
+    
+    return 0;
+}
