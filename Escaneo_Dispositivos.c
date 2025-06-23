@@ -14,6 +14,7 @@
 #define IntervaloEscaneo 20
 #define Cant_Max_Disp 5
 #define MAX_PATH 4096
+#define ANOMALIAS_FILE "/tmp/anomalias_dispositivos.dat"
 
 // Estructuras:
 typedef struct baseline_info {
@@ -71,6 +72,19 @@ void Exit();
 void extraer_nombre_y_extension(const char *ruta, char *nombre, char *extension);
 void DispositivosConectados();
 
+
+
+void registrar_alerta_dispositivo(const char *tipo, const char *ruta, const char *detalles) {
+    FILE *f = fopen(ANOMALIAS_FILE, "a");
+    if (f) {
+        fprintf(f, "%s|%s|%s\n", tipo, ruta, detalles);
+        fclose(f);
+    }
+    
+    printf("\033[1;31m[ALERTA] %s: %s - %s\033[0m\n", tipo, ruta, detalles);
+}
+
+
 int main()
 {
 
@@ -80,16 +94,28 @@ int main()
     init_guard_system();
 
     printf("🛡️  MatCom Guard iniciado - Patrullando las fronteras del reino...\n");
-    printf("⚙️  Umbral de alerta: %d%% de cambios\n", guard.umbral);
     printf("🔄 Intervalo de escaneo: %d segundos\n\n", IntervaloEscaneo);
+    FILE *f_dispositivos = fopen("/tmp/dispositivos.dat", "w");
+    FILE *f_anomalias = fopen("/tmp/anomalias_dispositivos.dat", "w");
+        
     
     // Ciclo principal de monitoreo
     while (guard.activo) {
+        FILE *f = fopen(ANOMALIAS_FILE, "w");
+        if (f) fclose(f);
         DispositivosConectados();
         
-        FILE *f_dispositivos = fopen("/tmp/dispositivos.dat", "w");
-        FILE *f_anomalias = fopen("/tmp/anomalias_dispositivos.dat", "w");
         
+
+        scan_mount_points();
+        
+        // EJECUTAR MONITOREO PARA CADA DISPOSITIVO
+        for (int i = 0; i < guard.total_disp; i++) {
+            if (guard.dispositivos[i].is_monitored) {
+                MonitorearDisp(&guard.dispositivos[i]);  // <-- LLAMADA CLAVE
+            }
+        }
+
         if (f_dispositivos) {
             for (int i = 0; i < guard.total_disp; i++) {
                 fprintf(f_dispositivos, "Dispositivo: %s\nMontado en: %s\nEstado: %s\n\n",
@@ -284,7 +310,7 @@ void DetectarCambios(Node* baseline, Node* escaneo_actual) {
     while (base) {
         
         if (!BuscarArchivo(escaneo_actual, base, 1, &cmp)) {
-            printf("ALERTA] Archivo legitimo eliminado: %s\n", base->info.ruta);
+            registrar_alerta_dispositivo("Archivo eliminado", base->info.ruta, "Archivo legítimo desaparecido");
         }
         base = base->next;
     }
@@ -299,7 +325,7 @@ void DetectarCambios(Node* baseline, Node* escaneo_actual) {
         if (!encontrado) {
             // Alerta para nuevos ejecutables
             if (strcmp(act->info.extension, "exe") == 0) {
-                printf("[ALERTA] Archivo ejecutable añadido: %s\n", act->info.ruta);
+                registrar_alerta_dispositivo("Archivo ejecutable añadido", act->info.ruta, "Nuevo archivo detectado");
             }
         } else if(cmp){
             CompararArchivos(&encontrado->info, &act->info); //Verificar modificaciones 
@@ -319,13 +345,13 @@ Node* BuscarArchivo(Node* lista, Node* node, int alert, int *cmp) {
             //Mismo hash, distinto nombre -> replicacion del archivo
             if(strcmp(actual->info.nombre, node->info.nombre) != 0)
             {
-                printf("[ALERTA] Replicacion sospechosa del archivo : %s ,se encontro un archivo igual con el nombre %s\n", actual -> info.nombre, node->info.nombre);
+                registrar_alerta_dispositivo("Replicacion sospechosa", node->info.ruta, "Resplicacion sospechosa de archivo");
                 *cmp = 0;
+                
             }
             // Alerta especial para cambios a .exe
             if (strcmp(actual->info.extension, "exe") == 0 && strcmp(node->info.extension, "exe") != 0 && alert) {
-                printf("[ALERTA] Cambio de extensión sospechoso: %s a %s (%s)\n",
-                    node->info.extension, actual->info.extension, node->info.ruta);
+                registrar_alerta_dispositivo("Cambio de extensión sospechoso", node->info.ruta, "Cambio de extensión sospechoso");
             }  
             return actual;
         }
@@ -344,7 +370,7 @@ void CompararArchivos(const baseline_info* a, const baseline_info* b)
     }
     if(a->mtime != b->mtime)
     {
-        printf("[ALERTA] Atributo timestamp alterado de %s\n", a->ruta);
+        registrar_alerta_dispositivo("Timestamp modificado", a->ruta, "Atributo de tiempo alterado");
     }
     if(a->permisos != b->permisos)
     {
@@ -360,7 +386,9 @@ void CompararArchivos(const baseline_info* a, const baseline_info* b)
     }
     if(a->gid != b->gid)
     {
+        
         printf("[ALERTA] GroupID modificado %s\n", a->ruta);
+        
     }
 }
 
@@ -368,11 +396,13 @@ void VerificarCrecimientoInusual(const baseline_info* a, const baseline_info* b,
 {
     if((a -> tamanno > b ->tamanno) && (a -> tamanno - b ->tamanno > umbral))
     {
-        printf("[ALERTA] Decrecimiento inusual del tamanno del archivo %s\n", a ->ruta);
+        registrar_alerta_dispositivo("Decrecimiento inusual del tamanno del archivo", a->ruta, "Decrecimiento inusual del tamanno del archivo");
+        
     }
     else if((a -> tamanno < b ->tamanno) && (b ->tamanno - a ->tamanno > umbral))
     {
-        printf("[ALERTA] Crecimiento inusual del tamanno del archivo %s\n", a->ruta);
+        registrar_alerta_dispositivo("Crecimiento inusual del tamanno del archivo", a->ruta, "Crecimiento inusual del tamanno del archivo");
+        
     }
 }
 

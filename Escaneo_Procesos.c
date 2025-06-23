@@ -8,9 +8,9 @@
 #include <math.h>
 
 #define CONFIG_PATH "/etc/matcomguard.conf"
-#define DEFAULT_CPU_THRESHOLD 40
-#define DEFAULT_RAM_THRESHOLD 50
-#define DEFAULT_DURATION 10
+#define DEFAULT_CPU_THRESHOLD 5
+#define DEFAULT_RAM_THRESHOLD 5
+#define DEFAULT_DURATION 2
 
 typedef struct {
     pid_t pid;
@@ -216,8 +216,7 @@ void registrar_alerta(Proceso *p, Configuracion *config) {
     }
 }
 
-void verificar_umbrales(Proceso *actual, Proceso *previos, int num_previos, 
-                       Configuracion *config, double intervalo) {
+void verificar_umbrales(Proceso *actual, Proceso *previos, int num_previos, Configuracion *config, double intervalo) {
     for(int i = 0; i < num_previos; i++) {
         if(previos[i].pid == actual->pid) {
             actual->cpu_percent = calcular_porcentaje_cpu(actual, &previos[i], intervalo);
@@ -286,8 +285,6 @@ void vigilancia_real(time_t intervalo, Configuracion *config) {
     free(procesos_previos);
     free(procesos_actuales);
 }
-
-
 
 int main(int argc, char *argv[]) {
     FILE *log_procesos = fopen("/var/log/guardian_procesos.log", "a");

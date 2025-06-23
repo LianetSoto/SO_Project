@@ -14,6 +14,7 @@
 #include <arpa/inet.h>
 
 #define MAX_LOG_SIZE 10000
+#define ANOMALIAS_FILE "/tmp/anomalias_dispositivos.dat"
 
 GtkWidget *text_view;
 
@@ -169,7 +170,7 @@ gboolean monitorear_log(gpointer user_data) {
     static time_t last_update = 0;
     time_t now = time(NULL);
     
-    if (difftime(now, last_update) >= 3.0) { 
+    if (difftime(now, last_update) >= 5.0) { 
         actualizar_lista_procesos();
         last_update = now;
     }
@@ -252,7 +253,7 @@ void cargar_puertos_abiertos() {
                 char *token = strtok(anom, ",");
                 
                 while (token) {
-                    // Mapear códigos a descripciones (sin usar enum de project.c)
+                    
                     const char *desc_anom = "Anomalía desconocida";
                     switch(atoi(token)) {
                         case 1: desc_anom = "Puerto no registrado"; break;
@@ -286,30 +287,58 @@ gboolean actualizar_puertos(gpointer user_data) {
 
 //Detección y Escaneo de Dispositivos Conectados
 
+// Detección y Escaneo de Dispositivos Conectados
 void cargar_dispositivos() {
     // Dispositivos conectados
     FILE *f = fopen("/tmp/dispositivos.dat", "r");
     if (f) {
-        char content[4096];
-        size_t len = fread(content, 1, sizeof(content), f);
-        content[len] = '\0';
+        fseek(f, 0, SEEK_END);
+        long size = ftell(f);
+        fseek(f, 0, SEEK_SET);
+        
+        char *content = malloc(size + 1);
+        if (content) {
+            fread(content, 1, size, f);
+            content[size] = '\0';
+            gtk_text_buffer_set_text(buffer_dispositivos, content, -1);
+            free(content);
+        }
         fclose(f);
-        gtk_text_buffer_set_text(buffer_dispositivos, content, -1);
     } else {
         gtk_text_buffer_set_text(buffer_dispositivos, "Esperando datos de dispositivos...", -1);
     }
 
     // Anomalías de dispositivos
-    f = fopen("/tmp/anomalias_dispositivos.dat", "r");
-    if (f) {
-        char content[4096];
-        size_t len = fread(content, 1, sizeof(content), f);
-        content[len] = '\0';
-        fclose(f);
-        gtk_text_buffer_set_text(buffer_anomalias_dispositivos, content, -1);
+     GString *alertas_text = g_string_new(NULL);
+    FILE *f_alertas = fopen("/tmp/anomalias_dispositivos.dat", "r");
+    
+    if (f_alertas) {
+        char line[1024];
+        int hay_alertas = 0;
+        
+        while (fgets(line, sizeof(line), f_alertas)) {
+            char *tipo = strtok(line, "|");
+            char *ruta = strtok(NULL, "|");
+            char *detalles = strtok(NULL, "\n");
+            
+            if (tipo && ruta && detalles) {
+                g_string_append_printf(alertas_text, "• %s\n   Ruta: %s\n   Detalles: %s\n\n", 
+                                      tipo, ruta, detalles);
+                hay_alertas = 1;
+            }
+        }
+        fclose(f_alertas);
+        
+        if (hay_alertas) {
+            gtk_text_buffer_set_text(buffer_anomalias_dispositivos, alertas_text->str, -1);
+        } else {
+            gtk_text_buffer_set_text(buffer_anomalias_dispositivos, "Sin alertas recientes", -1);
+        }
     } else {
-        gtk_text_buffer_set_text(buffer_anomalias_dispositivos, "Sin anomalías en dispositivos", -1);
+        gtk_text_buffer_set_text(buffer_anomalias_dispositivos, "No hay datos de alertas", -1);
     }
+    
+    g_string_free(alertas_text, TRUE);
 }
 
 gboolean actualizar_dispositivos(gpointer user_data) {
@@ -348,6 +377,26 @@ static void on_scan_all(GtkWidget *widget, gpointer data) {
     on_scan_devices(widget, data);
     cargar_puertos_abiertos();
 	mostrar_alertas_nuevas(buffer_procesos);
+}
+
+static void cerrar_aplicacion(GtkWidget *widget, gpointer data) {
+    if (log_fd != -1) {
+        close(log_fd);
+        log_fd = -1;
+    }
+    
+    if (watch_id) {
+        g_source_remove(watch_id);
+        watch_id = 0;
+    }
+    
+    if (remove(ANOMALIAS_FILE)) {
+        perror("Error al borrar anomalias_dispositivos.dat");
+    } else {
+        printf("Archivo %s borrado\n", ANOMALIAS_FILE);
+    }
+    
+    gtk_main_quit();
 }
 
 
@@ -543,7 +592,7 @@ static void activate(GtkApplication *app, gpointer user_data) {
     buffer_dispositivos = gtk_text_view_get_buffer(GTK_TEXT_VIEW(text_dispositivos));
 
     g_timeout_add_seconds(5, actualizar_dispositivos, NULL);
-    g_timeout_add_seconds(2, actualizar_puertos, NULL);
+    g_timeout_add_seconds(10, actualizar_puertos, NULL);
 
     actualizar_lista_procesos(); 
     on_scan_devices(NULL, NULL);  
@@ -574,29 +623,20 @@ static void activate(GtkApplication *app, gpointer user_data) {
     gtk_box_pack_start(GTK_BOX(buttons_box), btn_all, TRUE, TRUE, 0);
     
     gtk_box_pack_start(GTK_BOX(main_box), buttons_box, FALSE, FALSE, 0);
+    
+    g_signal_connect(window, "destroy", G_CALLBACK(cerrar_aplicacion), NULL);
 
     gtk_widget_show_all(window);
 }
 
-static void cerrar_aplicacion(GtkWidget *widget, gpointer data) {
-    if (log_fd != -1) {
-        close(log_fd);
-        log_fd = -1;
-    }
-    
-    if (watch_id) {
-        g_source_remove(watch_id);
-        watch_id = 0;
-    }
-    
-    gtk_main_quit();
-}
 
 int main(int argc, char **argv) {
 
     
     system("touch /tmp/puertos_abiertos.dat");
     system("chmod 666 /tmp/puertos_abiertos.dat");
+    system("touch /tmp/anomalias_dispositivos.dat");
+    system("chmod 666 /tmp/anomalias_dispositivos.dat");
 
     GtkApplication *app;
     int status;
@@ -606,6 +646,15 @@ int main(int argc, char **argv) {
         mkdir("/var/log", 0755);
     }
 
+    FILE *g = fopen("/tmp/dispositivos.dat", "w");
+    if (g) {
+        fprintf(g, "Esperando datos...\n");
+        fclose(g);
+        system("chmod 666 /tmp/dispositivos.dat");
+    } else {
+        perror("Error creando archivo temporal");
+    }
+    
     FILE *f = fopen("/tmp/puertos_abiertos.dat", "w");
     if (f) {
         fprintf(f, "Esperando datos...\n");
@@ -618,6 +667,7 @@ int main(int argc, char **argv) {
         execl("./EscaneoDispositivos", "EscaneoDispositivos", NULL);
         exit(0);
     }
+
 
     log_buffer = g_string_new(NULL);
     new_log_entries = FALSE;
@@ -642,6 +692,7 @@ int main(int argc, char **argv) {
         g_source_remove(watch_id);
         watch_id = 0;
     }
+
     
     g_object_unref(app);
     return status;
