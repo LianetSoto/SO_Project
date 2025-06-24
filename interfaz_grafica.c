@@ -113,7 +113,8 @@ gboolean monitorear_log(gpointer user_data) {
         return TRUE;
     }
 
-    if (st.st_size > last_size) {
+    if (st.st_size > last_size) 
+    {
         gsize bytes_to_read = st.st_size - last_size;
         gchar *buffer = g_malloc(bytes_to_read + 1);
         
@@ -162,7 +163,8 @@ gboolean monitorear_log(gpointer user_data) {
         g_free(buffer);
         last_size = st.st_size;
     }
-    else if (st.st_size < last_size) {
+    else if (st.st_size < last_size) 
+    {
         last_size = 0;
         gtk_text_buffer_set_text(buffer_procesos, "", -1);
     }
@@ -178,7 +180,9 @@ gboolean monitorear_log(gpointer user_data) {
     return TRUE;
 }
 
-void iniciar_monitoreo_log(GtkTextView *text_view) {
+void iniciar_monitoreo_log(GtkTextView *text_view) 
+{
+    //abrir archivo de log
     const gchar *log_path = "/var/log/guardian_procesos.log";
     
     if (access(log_path, F_OK)) {
@@ -253,7 +257,7 @@ void cargar_puertos_abiertos() {
                 char *token = strtok(anom, ",");
                 
                 while (token) {
-                    
+                    // Mapear códigos a descripciones (sin usar enum de project.c)
                     const char *desc_anom = "Anomalía desconocida";
                     switch(atoi(token)) {
                         case 1: desc_anom = "Puerto no registrado"; break;
@@ -262,7 +266,7 @@ void cargar_puertos_abiertos() {
                         case 4: desc_anom = "Puerto de malware"; break;
                         case 5: desc_anom = "Metasploit default"; break;
                     }
-                    g_string_append_printf(anomalias_text, "[!] Puerto %s: %s\n", port, desc_anom);
+                    g_string_append_printf(anomalias_text, "[Alerta] Puerto %s: %s\n", port, desc_anom);
                     token = strtok(NULL, ";");
                 }
             }
@@ -285,7 +289,6 @@ gboolean actualizar_puertos(gpointer user_data) {
     return TRUE;  // Mantener activo
 }
 
-//Detección y Escaneo de Dispositivos Conectados
 
 // Detección y Escaneo de Dispositivos Conectados
 void cargar_dispositivos() {
@@ -390,6 +393,7 @@ static void cerrar_aplicacion(GtkWidget *widget, gpointer data) {
         watch_id = 0;
     }
     
+    // Borrar el archivo de anomalías de dispositivos
     if (remove(ANOMALIAS_FILE)) {
         perror("Error al borrar anomalias_dispositivos.dat");
     } else {
@@ -399,29 +403,29 @@ static void cerrar_aplicacion(GtkWidget *widget, gpointer data) {
     gtk_main_quit();
 }
 
-
-
 static void activate(GtkApplication *app, gpointer user_data) {
-     GtkWidget *window;
+    GtkWidget *window;
     GtkWidget *grid;
     GtkWidget *button;
     GtkWidget *main_box;
     GtkWidget *results_box;
     GtkCssProvider *provider;
     
+    //crear ventana principal
     window = gtk_application_window_new(app);
     gtk_window_set_title(GTK_WINDOW(window), "Gran Salón del Trono - Monitor del Reino");
     gtk_window_set_default_size(GTK_WINDOW(window), 50, 400);
     
+    //aplicar estilo css
     provider = gtk_css_provider_new();
     gtk_css_provider_load_from_data(provider, 
-        "window, box, grid { background-color: #d8e8f8;}"
+        "window, box, grid { background-color:rgb(214, 171, 247);}"
         "textview {"
         "   background: #f0f8ff;"
-        "   color: #1a3a5a;"
+        "   color:rgb(124, 3, 126);"
         "}"
         "button {"
-        "   background-color: #1e3c5a;"
+        "   background-color:rgb(90, 8, 88);"
         "   color: white;"
         "   border-radius: 8px;"
         "   padding: 12px;"
@@ -429,7 +433,7 @@ static void activate(GtkApplication *app, gpointer user_data) {
         "   font-weight: bold;"
         "}"
         "button:hover {"
-        "   background-color: #8fb6d1;"
+        "   background-color:rgb(181, 5, 190);"
         "   transition: 0.3s;"
         "}"
         "result-frame {"
@@ -591,7 +595,7 @@ static void activate(GtkApplication *app, gpointer user_data) {
     buffer_anomalias_dispositivos = gtk_text_view_get_buffer(GTK_TEXT_VIEW(text_anomalias_dispositivos));
     buffer_dispositivos = gtk_text_view_get_buffer(GTK_TEXT_VIEW(text_dispositivos));
 
-    g_timeout_add_seconds(5, actualizar_dispositivos, NULL);
+    g_timeout_add_seconds(20, actualizar_dispositivos, NULL);
     g_timeout_add_seconds(10, actualizar_puertos, NULL);
 
     actualizar_lista_procesos(); 
@@ -606,19 +610,19 @@ static void activate(GtkApplication *app, gpointer user_data) {
     gtk_widget_set_margin_bottom(buttons_box, 20);
     gtk_box_set_homogeneous(GTK_BOX(buttons_box), TRUE);
     
-    GtkWidget *btn_devices = gtk_button_new_with_label("Escanear sistema de archivos");
+    GtkWidget *btn_devices = gtk_button_new_with_label("Escanear Procesos");
     g_signal_connect(btn_devices, "clicked", G_CALLBACK(on_scan_filesystem), NULL);
     gtk_box_pack_start(GTK_BOX(buttons_box), btn_devices, TRUE, TRUE, 0);
 
-    GtkWidget *btn_usb = gtk_button_new_with_label("Escanear memoria");
-    g_signal_connect(btn_usb, "clicked", G_CALLBACK(on_scan_devices), NULL);
-    gtk_box_pack_start(GTK_BOX(buttons_box), btn_usb, TRUE, TRUE, 0);
-
-    GtkWidget *btn_ports = gtk_button_new_with_label("Escanear puertos");
+    GtkWidget *btn_ports = gtk_button_new_with_label("Escanear Puertos");
     g_signal_connect(btn_ports, "clicked", G_CALLBACK(on_scan_ports), NULL);
     gtk_box_pack_start(GTK_BOX(buttons_box), btn_ports, TRUE, TRUE, 0);
 
-    GtkWidget *btn_all = gtk_button_new_with_label("Escanear todo");
+    GtkWidget *btn_usb = gtk_button_new_with_label("Escanear USB");
+    g_signal_connect(btn_usb, "clicked", G_CALLBACK(on_scan_devices), NULL);
+    gtk_box_pack_start(GTK_BOX(buttons_box), btn_usb, TRUE, TRUE, 0);
+
+    GtkWidget *btn_all = gtk_button_new_with_label("Escanear Todo");
     g_signal_connect(btn_all, "clicked", G_CALLBACK(on_scan_all), NULL);
     gtk_box_pack_start(GTK_BOX(buttons_box), btn_all, TRUE, TRUE, 0);
     
@@ -629,10 +633,9 @@ static void activate(GtkApplication *app, gpointer user_data) {
     gtk_widget_show_all(window);
 }
 
-
 int main(int argc, char **argv) {
 
-    
+    //crear archivos temporales con permisos
     system("touch /tmp/puertos_abiertos.dat");
     system("chmod 666 /tmp/puertos_abiertos.dat");
     system("touch /tmp/anomalias_dispositivos.dat");
@@ -663,16 +666,17 @@ int main(int argc, char **argv) {
     } else {
         perror("Error creando archivo temporal");
     }
-    if (fork() == 0) {
-        execl("./EscaneoDispositivos", "EscaneoDispositivos", NULL);
-        exit(0);
-    }
+
+    // //proceso hijo para escaneo de dispositivos
+    // if (fork() == 0) {
+    //     execl("./EscaneoDispositivos", "EscaneoDispositivos", NULL);
+    //     exit(0);
+    // }
 
 
     log_buffer = g_string_new(NULL);
     new_log_entries = FALSE;
 
-    
     FILE *log = fopen("/var/log/guardian_puertos.log", "a");
     if (log) fclose(log);
     else perror("No se pudo crear /var/log/guardian_procesos.log");

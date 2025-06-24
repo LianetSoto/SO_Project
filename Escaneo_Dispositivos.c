@@ -26,8 +26,8 @@ typedef struct baseline_info {
     gid_t gid; // Grupo (group ID)
     char hash[SHA256_DIGEST_LENGTH]; // Hash SHA-256
 
-    char nombre[256];     // Nuevo: nombre del archivo (sin ruta)
-    char extension[16];   // Nuevo: extensión del archivo (sin punto)
+    char nombre[256];     // nombre del archivo 
+    char extension[16];   // extensión del archivo 
 
 }baseline_info;
 
@@ -72,8 +72,6 @@ void Exit();
 void extraer_nombre_y_extension(const char *ruta, char *nombre, char *extension);
 void DispositivosConectados();
 
-
-
 void registrar_alerta_dispositivo(const char *tipo, const char *ruta, const char *detalles) {
     FILE *f = fopen(ANOMALIAS_FILE, "a");
     if (f) {
@@ -81,6 +79,7 @@ void registrar_alerta_dispositivo(const char *tipo, const char *ruta, const char
         fclose(f);
     }
     
+    // También imprimir en consola
     printf("\033[1;31m[ALERTA] %s: %s - %s\033[0m\n", tipo, ruta, detalles);
 }
 
@@ -95,8 +94,7 @@ int main()
 
     printf("🛡️  MatCom Guard iniciado - Patrullando las fronteras del reino...\n");
     printf("🔄 Intervalo de escaneo: %d segundos\n\n", IntervaloEscaneo);
-    FILE *f_dispositivos = fopen("/tmp/dispositivos.dat", "w");
-    FILE *f_anomalias = fopen("/tmp/anomalias_dispositivos.dat", "w");
+    //FILE *f_anomalias = fopen("/tmp/anomalias_dispositivos.dat", "w");
         
     
     // Ciclo principal de monitoreo
@@ -105,10 +103,6 @@ int main()
         if (f) fclose(f);
         DispositivosConectados();
         
-        
-
-        scan_mount_points();
-        
         // EJECUTAR MONITOREO PARA CADA DISPOSITIVO
         for (int i = 0; i < guard.total_disp; i++) {
             if (guard.dispositivos[i].is_monitored) {
@@ -116,6 +110,7 @@ int main()
             }
         }
 
+        FILE *f_dispositivos = fopen("/tmp/dispositivos.dat", "w");
         if (f_dispositivos) {
             for (int i = 0; i < guard.total_disp; i++) {
                 fprintf(f_dispositivos, "Dispositivo: %s\nMontado en: %s\nEstado: %s\n\n",
@@ -126,11 +121,11 @@ int main()
             fclose(f_dispositivos);
         }
         
-        if (f_anomalias) {
-            // Implementar función que genere anomalías aquí
-            fprintf(f_anomalias, "Anomalías detectadas...\n");
-            fclose(f_anomalias);
-        }
+        // if (f_anomalias) {
+        //     // Implementar función que genere anomalías aquí
+        //     fprintf(f_anomalias, "Anomalías detectadas...\n");
+        //     fclose(f_anomalias);
+        // }
         
         sleep(IntervaloEscaneo);
     }
@@ -345,7 +340,7 @@ Node* BuscarArchivo(Node* lista, Node* node, int alert, int *cmp) {
             //Mismo hash, distinto nombre -> replicacion del archivo
             if(strcmp(actual->info.nombre, node->info.nombre) != 0)
             {
-                registrar_alerta_dispositivo("Replicacion sospechosa", node->info.ruta, "Resplicacion sospechosa de archivo");
+                registrar_alerta_dispositivo("Replicacion sospechosa, se encontro un archivo igual con el nombre", node->info.ruta, "Resplicacion sospechosa de archivo, se encontro un archivo igual con el nombre");
                 *cmp = 0;
                 
             }
@@ -370,25 +365,23 @@ void CompararArchivos(const baseline_info* a, const baseline_info* b)
     }
     if(a->mtime != b->mtime)
     {
-        registrar_alerta_dispositivo("Timestamp modificado", a->ruta, "Atributo de tiempo alterado");
+        registrar_alerta_dispositivo("Atributo de tiempo alterado", a->ruta, "Atributo de tiempo alterado");
     }
     if(a->permisos != b->permisos)
     {
-
         if(VerificarPermisoCritico(b -> permisos))
         {
-            printf("[ALERTA] Permiso cambiado de %s a %o\n", a->ruta, b -> permisos);
+            registrar_alerta_dispositivo("Permiso cambiado de %s a %o\n", a->ruta, "Permiso cambiado de %s a %o\n");
         }
     }
     if(a->uid != b->uid)
     {
-        printf("[ALERTA] UserID modificado %s\n", a->ruta);
+        registrar_alerta_dispositivo("UserID modificado %s\n", a->ruta, "UserID modificado %s\n");
     }
     if(a->gid != b->gid)
     {
-        
-        printf("[ALERTA] GroupID modificado %s\n", a->ruta);
-        
+        registrar_alerta_dispositivo("GroupID modificado %s\n", a->ruta, "GroupID modificado %s\n");
+
     }
 }
 
