@@ -322,11 +322,10 @@ void cargar_dispositivos() {
         while (fgets(line, sizeof(line), f_alertas)) {
             char *tipo = strtok(line, "|");
             char *ruta = strtok(NULL, "|");
-            char *detalles = strtok(NULL, "\n");
             
-            if (tipo && ruta && detalles) {
-                g_string_append_printf(alertas_text, "• %s\n   Ruta: %s\n   Detalles: %s\n\n", 
-                                      tipo, ruta, detalles);
+            if (tipo && ruta) {
+                g_string_append_printf(alertas_text, "• %s\n   Ruta: %s\n\n", 
+                                      tipo, ruta);
                 hay_alertas = 1;
             }
         }

@@ -176,6 +176,7 @@ void check_anomalies(int port, ScanResult *result)
         break;
     case 666:
         result -> anomalies[result->anomaly_count++] = ANOMALY_MALWARE_PORT;
+        total_anomalies++;
         break;
     }
 }

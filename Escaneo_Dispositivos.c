@@ -72,21 +72,19 @@ void Exit();
 void extraer_nombre_y_extension(const char *ruta, char *nombre, char *extension);
 void DispositivosConectados();
 
-void registrar_alerta_dispositivo(const char *tipo, const char *ruta, const char *detalles) {
+void registrar_alerta_dispositivo(const char *tipo, const char *ruta) {
     FILE *f = fopen(ANOMALIAS_FILE, "a");
     if (f) {
-        fprintf(f, "%s|%s|%s\n", tipo, ruta, detalles);
+        fprintf(f, "%s|%s\n", tipo, ruta);
         fclose(f);
     }
     
     // También imprimir en consola
-    printf("\033[1;31m[ALERTA] %s: %s - %s\033[0m\n", tipo, ruta, detalles);
+    printf("\033[1;31m[ALERTA] %s: %s \033[0m\n", tipo, ruta);
 }
-
 
 int main()
 {
-
     signal(SIGINT, Exit);
     signal(SIGTERM, Exit);
 
@@ -94,7 +92,6 @@ int main()
 
     printf("🛡️  MatCom Guard iniciado - Patrullando las fronteras del reino...\n");
     printf("🔄 Intervalo de escaneo: %d segundos\n\n", IntervaloEscaneo);
-    //FILE *f_anomalias = fopen("/tmp/anomalias_dispositivos.dat", "w");
         
     
     // Ciclo principal de monitoreo
@@ -120,12 +117,6 @@ int main()
             }
             fclose(f_dispositivos);
         }
-        
-        // if (f_anomalias) {
-        //     // Implementar función que genere anomalías aquí
-        //     fprintf(f_anomalias, "Anomalías detectadas...\n");
-        //     fclose(f_anomalias);
-        // }
         
         sleep(IntervaloEscaneo);
     }
@@ -169,47 +160,6 @@ void DispositivosConectados()
     }
 }
 
-int calculate_hash(const char *filepath, char *hash_output) {
-    if (!filepath || !hash_output) return -1;
-    
-    FILE *file = fopen(filepath, "rb");
-    if (!file) return -1;
-    
-    // Hash simple basado en tamanno, primera parte y última parte del archivo
-    struct stat st;
-    if (fstat(fileno(file), &st) != 0) {
-        fclose(file);
-        return -1;
-    }
-    
-    unsigned long hash = st.st_size;
-    unsigned char buffer[1024];
-    size_t bytes_read;
-    
-    // Leer primeros 512 bytes
-    bytes_read = fread(buffer, 1, 512, file);
-    for (size_t i = 0; i < bytes_read; i++) {
-        hash = hash * 31 + buffer[i];
-    }
-    
-    // Si el archivo es grande, leer últimos 512 bytes
-    if (st.st_size > 1024) {
-        if (fseek(file, -512, SEEK_END) == 0) {
-            bytes_read = fread(buffer, 1, 512, file);
-            for (size_t i = 0; i < bytes_read; i++) {
-                hash = hash * 31 + buffer[i];
-            }
-        }
-    }
-    
-    // Convertir a string hexadecimal
-    snprintf(hash_output, SHA256_DIGEST_LENGTH, "%08lx", hash);
-    
-    fclose(file);
-    return 0;
-}
-
-
 Node* Create_Node(const char *ruta, struct stat *st) {
     Node *new = malloc(sizeof(Node));
     if (!new) return NULL;
@@ -230,32 +180,6 @@ Node* Create_Node(const char *ruta, struct stat *st) {
 
     new->next = NULL;
     return new;
-}
-
-void extraer_nombre_y_extension(const char *ruta, char *nombre, char *extension) {
-    char *copia = strdup(ruta);
-
-    // Extraer solo el nombre del archivo
-    char *nombre_archivo = basename(copia);  // Usa basename para obtener solo el nombre del archivo
-    
-    // Copiar el nombre completo
-    strncpy(nombre, nombre_archivo, 255);
-    nombre[255] = '\0';  // Asegurar terminación nula
-    
-    // Buscar el último punto para la extensión
-    char *punto = strrchr(nombre_archivo, '.');
-    if (punto && punto != nombre_archivo) {  // Si hay punto y no es un archivo oculto
-        strncpy(extension, punto + 1, 15);  // Copiar sin el punto
-        extension[15] = '\0';
-        
-        // Eliminar la extensión del nombre
-        *punto = '\0';  // Trunca el nombre en el punto
-        strncpy(nombre, nombre_archivo, 255);  // Vuelve a copiar sin extensión
-    } else {
-        strcpy(extension, "");  // Sin extensión
-    }
-    
-    free(copia);
 }
 
 void escanear_directorio(const char *path, Node**lista) {
@@ -305,7 +229,7 @@ void DetectarCambios(Node* baseline, Node* escaneo_actual) {
     while (base) {
         
         if (!BuscarArchivo(escaneo_actual, base, 1, &cmp)) {
-            registrar_alerta_dispositivo("Archivo eliminado", base->info.ruta, "Archivo legítimo desaparecido");
+            registrar_alerta_dispositivo("Archivo legitimo eliminado", base->info.ruta);
         }
         base = base->next;
     }
@@ -320,7 +244,7 @@ void DetectarCambios(Node* baseline, Node* escaneo_actual) {
         if (!encontrado) {
             // Alerta para nuevos ejecutables
             if (strcmp(act->info.extension, "exe") == 0) {
-                registrar_alerta_dispositivo("Archivo ejecutable añadido", act->info.ruta, "Nuevo archivo detectado");
+                registrar_alerta_dispositivo("Archivo ejecutable añadido", act->info.ruta);
             }
         } else if(cmp){
             CompararArchivos(&encontrado->info, &act->info); //Verificar modificaciones 
@@ -340,13 +264,13 @@ Node* BuscarArchivo(Node* lista, Node* node, int alert, int *cmp) {
             //Mismo hash, distinto nombre -> replicacion del archivo
             if(strcmp(actual->info.nombre, node->info.nombre) != 0)
             {
-                registrar_alerta_dispositivo("Replicacion sospechosa, se encontro un archivo igual con el nombre", node->info.ruta, "Resplicacion sospechosa de archivo, se encontro un archivo igual con el nombre");
+                registrar_alerta_dispositivo("Replicacion sospechosa, se encontro replicado el archivo", actual->info.ruta);
                 *cmp = 0;
                 
             }
             // Alerta especial para cambios a .exe
             if (strcmp(actual->info.extension, "exe") == 0 && strcmp(node->info.extension, "exe") != 0 && alert) {
-                registrar_alerta_dispositivo("Cambio de extensión sospechoso", node->info.ruta, "Cambio de extensión sospechoso");
+                registrar_alerta_dispositivo("Cambio de extensión sospechoso", node->info.ruta);
             }  
             return actual;
         }
@@ -365,22 +289,22 @@ void CompararArchivos(const baseline_info* a, const baseline_info* b)
     }
     if(a->mtime != b->mtime)
     {
-        registrar_alerta_dispositivo("Atributo de tiempo alterado", a->ruta, "Atributo de tiempo alterado");
+        registrar_alerta_dispositivo("Atributo de tiempo alterado del archivo ", a->ruta);
     }
     if(a->permisos != b->permisos)
     {
         if(VerificarPermisoCritico(b -> permisos))
         {
-            registrar_alerta_dispositivo("Permiso cambiado de %s a %o\n", a->ruta, "Permiso cambiado de %s a %o\n");
+            registrar_alerta_dispositivo("Permiso cambiado del archivo ", a->ruta);
         }
     }
     if(a->uid != b->uid)
     {
-        registrar_alerta_dispositivo("UserID modificado %s\n", a->ruta, "UserID modificado %s\n");
+        registrar_alerta_dispositivo("UserID modificado en ", a->ruta);
     }
     if(a->gid != b->gid)
     {
-        registrar_alerta_dispositivo("GroupID modificado %s\n", a->ruta, "GroupID modificado %s\n");
+        registrar_alerta_dispositivo("GroupID modificado en", a->ruta);
 
     }
 }
@@ -389,12 +313,12 @@ void VerificarCrecimientoInusual(const baseline_info* a, const baseline_info* b,
 {
     if((a -> tamanno > b ->tamanno) && (a -> tamanno - b ->tamanno > umbral))
     {
-        registrar_alerta_dispositivo("Decrecimiento inusual del tamanno del archivo", a->ruta, "Decrecimiento inusual del tamanno del archivo");
+        registrar_alerta_dispositivo("Decrecimiento inusual del tamanno del archivo", a->ruta);
         
     }
     else if((a -> tamanno < b ->tamanno) && (b ->tamanno - a ->tamanno > umbral))
     {
-        registrar_alerta_dispositivo("Crecimiento inusual del tamanno del archivo", a->ruta, "Crecimiento inusual del tamanno del archivo");
+        registrar_alerta_dispositivo("Crecimiento inusual del tamanno del archivo", a->ruta);
         
     }
 }
@@ -486,6 +410,72 @@ void LiberarLista(Node *lista) {
         free(actual);
         actual = siguiente;
     }
+}
+
+int calculate_hash(const char *filepath, char *hash_output) {
+    if (!filepath || !hash_output) return -1;
+    
+    FILE *file = fopen(filepath, "rb");
+    if (!file) return -1;
+    
+    // Hash simple basado en tamanno, primera parte y última parte del archivo
+    struct stat st;
+    if (fstat(fileno(file), &st) != 0) {
+        fclose(file);
+        return -1;
+    }
+    
+    unsigned long hash = st.st_size;
+    unsigned char buffer[1024];
+    size_t bytes_read;
+    
+    // Leer primeros 512 bytes
+    bytes_read = fread(buffer, 1, 512, file);
+    for (size_t i = 0; i < bytes_read; i++) {
+        hash = hash * 31 + buffer[i];
+    }
+    
+    // Si el archivo es grande, leer últimos 512 bytes
+    if (st.st_size > 1024) {
+        if (fseek(file, -512, SEEK_END) == 0) {
+            bytes_read = fread(buffer, 1, 512, file);
+            for (size_t i = 0; i < bytes_read; i++) {
+                hash = hash * 31 + buffer[i];
+            }
+        }
+    }
+    
+    // Convertir a string hexadecimal
+    snprintf(hash_output, SHA256_DIGEST_LENGTH, "%08lx", hash);
+    
+    fclose(file);
+    return 0;
+}
+
+void extraer_nombre_y_extension(const char *ruta, char *nombre, char *extension) {
+    char *copia = strdup(ruta);
+
+    // Extraer solo el nombre del archivo
+    char *nombre_archivo = basename(copia);  // Usa basename para obtener solo el nombre del archivo
+    
+    // Copiar el nombre completo
+    strncpy(nombre, nombre_archivo, 255);
+    nombre[255] = '\0';  // Asegurar terminación nula
+    
+    // Buscar el último punto para la extensión
+    char *punto = strrchr(nombre_archivo, '.');
+    if (punto && punto != nombre_archivo) {  // Si hay punto y no es un archivo oculto
+        strncpy(extension, punto + 1, 15);  // Copiar sin el punto
+        extension[15] = '\0';
+        
+        // Eliminar la extensión del nombre
+        *punto = '\0';  // Trunca el nombre en el punto
+        strncpy(nombre, nombre_archivo, 255);  // Vuelve a copiar sin extensión
+    } else {
+        strcpy(extension, "");  // Sin extensión
+    }
+    
+    free(copia);
 }
 
 void Exit(int sig) {
